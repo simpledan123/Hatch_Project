@@ -5,18 +5,20 @@
 `hatch_project`는 브라우저에서 펫을 생성하고 돌보는 다마고치 스타일의 웹 게임을 소재로 삼아, 상태 저장형 웹 서비스의 구현과 운영 보강을 함께 다뤄보는 프로젝트입니다.  
 단순히 화면에서 버튼을 누르는 데모가 아니라, 펫의 상태를 서버와 데이터베이스에 저장하고, 시간이 지남에 따라 상태가 실제로 변화하도록 구성했습니다.
 
-## 프로젝트 목표
+이 프로젝트의 목적은 작은 서비스를 대상으로 **실행 환경 통일, 상태 확인, 자동 검증, 배포 흐름, 운영 문서화**를 직접 정리해보는 데 있습니다.  
 
-`Subscribe_Dashboard`에서 Spring Boot 기반 웹 서비스 개발, 데이터 저장, 인증/인가, 테스트 자동화, CI 흐름을 경험했습니다.  
-반면 `hatch_project`에서는 다음과 같은 영역을 별도로 보강하는 것을 목표로 하고 있습니다.
+로컬 Docker Compose 환경과 WSL Ubuntu 환경에서 먼저 실행 및 점검 흐름을 검증한 뒤, 원격 Ubuntu 서버에도 실제로 배포해 서비스 기동, health check, smoke test, 배포 스크립트 동작까지 확인했습니다.
+
+## 프로젝트 목표
 
 - 상태 저장형 웹 서비스 설계
 - Docker Compose 기반 실행 환경 정리
 - health check / smoke test / deploy script 작성
 - WSL Ubuntu 기반 Linux 실행 경험 축적
+- 원격 Ubuntu 서버 배포 경험 추가
 - Jira 기반 작업 관리
 - Runbook 중심의 운영 문서화
-- 이후 원격 Ubuntu 서버 배포 및 CI/CD 확장
+- 이후 CI/CD와 관측성 보강
 
 즉, 이 프로젝트는 **기능 중심 웹앱을 하나 더 만드는 것**이 아니라, **작은 서비스를 대상으로 운영과 배포 흐름을 다뤄보는 실험 프로젝트**입니다.
 
@@ -48,9 +50,13 @@
 
 - Docker Compose 기반 실행 환경 통일
 - WSL Ubuntu 환경에서 컨테이너 기동 및 상태 확인
+- 원격 Ubuntu 서버에 실제 배포
 - Bash 기반 `healthcheck.sh`
 - Bash 기반 `smoke_test.sh`
 - Bash 기반 `deploy.sh`
+- Bash 기반 `remote_deploy.sh`
+- 배포용 `docker-compose.prod.yml` 분리
+- Nginx 기반 프론트 정적 서빙 구성
 - `RUNBOOK.md`를 통한 실행/점검/장애 대응 절차 정리
 
 ## 기술 스택
@@ -72,10 +78,12 @@
 - Docker
 - Docker Compose
 - Bash
+- Nginx
 - pytest
 - GitHub Actions
 - Jira
 - WSL Ubuntu
+- Ubuntu Server
 
 ## 개발하면서 신경 쓴 점
 
@@ -116,6 +124,29 @@
 - PostgreSQL은 사용자, 펫, 액션 로그 같은 상태 데이터를 저장합니다.
 - Redis는 상태 조회 캐시와 반복 액션 제어에 사용합니다.
 
+## 배포 구조
+
+production 배포에서는 프론트엔드를 Nginx로 정적 서빙하고, `/api` 요청은 backend 컨테이너로 프록시되도록 구성했습니다.
+
+```text
+[ Browser ]
+    |
+    v
+[ Nginx Frontend ]
+    |
+    +--> /api -> [ FastAPI Backend ] -> [ PostgreSQL ]
+                              |
+                              +-> [ Redis ]
+```
+
+배포용 설정은 아래 파일들을 기준으로 분리했습니다.
+
+- `frontend/Dockerfile.prod`
+- `frontend/nginx.conf`
+- `docker-compose.prod.yml`
+- `.env.prod`
+- `scripts/remote_deploy.sh`
+
 ## 실행 방법
 
 ### 1. 환경 변수 파일 생성
@@ -149,6 +180,8 @@ docker compose up --build
   - guest 생성 → 펫 생성 → 상태 조회 → 액션 수행까지 핵심 흐름 검증
 - `deploy.sh`
   - 컨테이너 실행 후 health check, smoke test까지 포함한 배포 흐름 재현
+- `remote_deploy.sh`
+  - production compose를 기준으로 원격 Ubuntu 서버에서 배포 흐름 실행
 
 실행 예시는 다음과 같습니다.
 
@@ -159,6 +192,25 @@ chmod +x scripts/*.sh
 ./scripts/deploy.sh
 ```
 
+## Production 배포 방법
+
+### 1. 배포용 환경 변수 파일 생성
+```bash
+cp .env.prod.example .env.prod
+```
+
+### 2. 배포 스크립트 실행
+```bash
+chmod +x scripts/*.sh
+./scripts/remote_deploy.sh
+```
+
+### 3. 주요 확인 포인트
+- Frontend 접속 확인
+- `/api/health/live` 응답 확인
+- `/api/health/ready` 응답 확인
+- `docker compose -f docker-compose.prod.yml logs` 로 로그 확인
+
 ## 검증한 내용
 
 현재까지 아래 항목을 직접 확인했습니다.
@@ -167,9 +219,14 @@ chmod +x scripts/*.sh
 - WSL Ubuntu 환경에서 컨테이너 기동
 - `/api/health/live`, `/api/health/ready` 응답 확인
 - `/ready` 기준 DB / Redis 정상 연결 확인
+- `healthcheck.sh` 실행 검증
+- `smoke_test.sh`를 통한 핵심 API 흐름 검증
 - `deploy.sh`를 통한 배포 흐름 재현
+- 원격 Ubuntu 서버에 production 구성으로 실제 배포
+- 원격 서버에서 서비스 기동 후 health check 및 로그 확인
+- Nginx를 통한 프론트 정적 서빙 및 `/api` 프록시 구성 확인
 
-즉, 단순 구현을 넘어서 **Linux 셸 환경에서 서비스 기동과 점검 흐름을 실제로 검증**한 상태입니다.
+즉, 단순 구현을 넘어서 **Linux 셸 환경과 원격 Ubuntu 서버에서 서비스 기동과 점검, 배포 흐름을 실제로 검증**한 상태입니다.
 
 ## 테스트 및 자동화
 
@@ -177,7 +234,7 @@ chmod +x scripts/*.sh
 - GitHub Actions backend CI 초안 구성
 - Bash 기반 운영 스크립트 추가
 
-현재는 백엔드 기초 테스트와 운영 스크립트 중심으로 검증 흐름을 만들고 있으며, 이후 배포 자동화와 원격 서버 기준 검증으로 확장할 예정입니다.
+현재는 백엔드 기초 테스트와 운영 스크립트 중심으로 검증 흐름을 만들고 있으며, 이후 배포 자동화와 원격 서버 기준 검증으로 확장하고 있습니다.
 
 ## 문서화 및 협업 도구
 
@@ -194,11 +251,10 @@ chmod +x scripts/*.sh
 - WSL Ubuntu 환경 실행 검증
 - healthcheck / smoke test / deploy script 추가
 - Runbook 초안 작성
+- 원격 Ubuntu 서버 배포 검증
 
 ### 다음 단계
-- 원격 Ubuntu 서버에 실제 배포
-- 배포용 compose 및 프론트 정적 서빙 구조 적용
-- 원격 서버 기준 health check / smoke test 검증
-- CI/CD 흐름 확장
+- 배포 후 자동 헬스체크 및 롤백 전략 정리
+- 운영 로그 및 모니터링 보강
 - 운영 문서 보강
 - 이후 게임성 확장(이벤트, 성장/진화, UI 개선)
