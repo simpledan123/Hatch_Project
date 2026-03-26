@@ -1,28 +1,26 @@
-version: "3.9"
-
 services:
   db:
     image: postgres:16
-    container_name: tamagotchi-db
+    container_name: hatch-db
+    restart: unless-stopped
+    env_file:
+      - .env.prod
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-tamagotchi}
-      POSTGRES_USER: ${POSTGRES_USER:-tamagotchi}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tamagotchi}
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - tamagotchi_pgdata:/var/lib/postgresql/data
+      - hatch_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tamagotchi} -d ${POSTGRES_DB:-tamagotchi}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   redis:
     image: redis:7
-    container_name: tamagotchi-redis
-    ports:
-      - "6379:6379"
+    container_name: hatch-redis
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -32,17 +30,18 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: tamagotchi-backend
+    container_name: hatch-backend
+    restart: unless-stopped
     env_file:
-      - .env
+      - .env.prod
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://tamagotchi:tamagotchi@db:5432/tamagotchi}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      BACKEND_HOST: ${BACKEND_HOST:-0.0.0.0}
-      BACKEND_PORT: ${BACKEND_PORT:-8000}
-      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: 8000
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -52,13 +51,15 @@ services:
   frontend:
     build:
       context: ./frontend
+      dockerfile: Dockerfile.prod
       args:
-        VITE_API_BASE_URL: ${FRONTEND_API_BASE_URL:-http://localhost:8000}
-    container_name: tamagotchi-frontend
+        VITE_API_BASE_URL: ""
+    container_name: hatch-frontend
+    restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "${NGINX_PORT:-80}:80"
     depends_on:
       - backend
 
 volumes:
-  tamagotchi_pgdata:
+  hatch_pgdata:

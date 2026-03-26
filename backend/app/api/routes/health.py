@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Response, status
 from sqlalchemy import text
 
 from app.db.session import SessionLocal
@@ -13,7 +13,7 @@ def live() -> dict:
 
 
 @router.get("/ready")
-def ready() -> dict:
+def ready(response: Response) -> dict:
     db_ok = False
     try:
         with SessionLocal() as session:
@@ -23,8 +23,13 @@ def ready() -> dict:
         db_ok = False
 
     redis_ok = is_redis_available()
+    overall_ok = db_ok and redis_ok
+
+    if not overall_ok:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
     return {
-        "status": "ok" if db_ok and redis_ok else "degraded",
+        "status": "ok" if overall_ok else "degraded",
         "database": db_ok,
         "redis": redis_ok,
     }
