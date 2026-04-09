@@ -1,0 +1,19 @@
+[Interface]
+# 서버 개인키 (wg genkey로 생성)
+PrivateKey = ${WG_SERVER_PRIVATE_KEY}
+
+# VPN 인터페이스 IP
+Address = 10.0.0.1/24
+
+# WireGuard 수신 포트
+ListenPort = 51820
+
+# 피어 연결 시 NAT 및 포워딩 규칙 자동 적용
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -A FORWARD -o wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -D FORWARD -o wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+
+# ── Peer 예시 ──────────────────────────────────────────────────────────────
+# wireguard_peer.sh add 로 자동 추가됨
+# [Peer]
+# PublicKey = <피어 공개키>
+# AllowedIPs = 10.0.0.2/32
