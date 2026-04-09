@@ -4,6 +4,7 @@ import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.api.router import api_router
 from app.core.config import get_settings
@@ -27,6 +28,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Prometheus metrics
+Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
 
 @app.middleware("http")

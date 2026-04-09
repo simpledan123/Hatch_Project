@@ -57,16 +57,79 @@ services:
     container_name: hatch-frontend
     restart: unless-stopped
     environment:
-      # nginx.conf.template 안의 ${DOMAIN} 치환에 사용됨
       DOMAIN: ${DOMAIN}
     ports:
       - "${NGINX_PORT:-80}:80"
       - "443:443"
     volumes:
-      # Let's Encrypt 인증서를 Nginx 컨테이너 안에서 읽기 위한 마운트
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - backend
 
+  # ── 모니터링 스택 ────────────────────────────────────────────────────────
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: hatch-node-exporter
+    restart: unless-stopped
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hatch-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - hatch_prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - backend
+      - node-exporter
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: hatch-alertmanager
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "127.0.0.1:9093:9093"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hatch-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - hatch_grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+
 volumes:
   hatch_pgdata:
+  hatch_prometheus_data:
+  hatch_grafana_data:

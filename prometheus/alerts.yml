@@ -1,0 +1,62 @@
+groups:
+  - name: hatch.rules
+    rules:
+      # 백엔드가 30초 이상 응답 없을 때
+      - alert: BackendDown
+        expr: up{job="hatch-backend"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "백엔드 서비스 다운"
+          description: "hatch-backend 가 30초 이상 응답하지 않습니다."
+
+      # 서버 CPU 사용률 80% 초과
+      - alert: HighCpuUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU 사용률 높음"
+          description: "CPU 사용률이 2분 이상 80%를 초과했습니다. 현재: {{ $value | printf \"%.1f\" }}%"
+
+      # 메모리 사용률 85% 초과
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "메모리 사용률 높음"
+          description: "메모리 사용률이 2분 이상 85%를 초과했습니다. 현재: {{ $value | printf \"%.1f\" }}%"
+
+      # 디스크 사용률 90% 초과
+      - alert: HighDiskUsage
+        expr: (1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "디스크 사용률 높음"
+          description: "루트 디스크 사용률이 90%를 초과했습니다. 현재: {{ $value | printf \"%.1f\" }}%"
+
+      # API 응답시간 p95 1초 초과
+      - alert: HighApiLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="hatch-backend"}[5m])) > 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API 응답시간 지연"
+          description: "API p95 응답시간이 2분 이상 1초를 초과했습니다."
+
+      # HTTP 5xx 에러율 5% 초과
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{job="hatch-backend", status=~"5.."}[5m]) / rate(http_requests_total{job="hatch-backend"}[5m]) * 100 > 5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "HTTP 5xx 에러율 높음"
+          description: "5xx 에러율이 1분 이상 5%를 초과했습니다. 현재: {{ $value | printf \"%.1f\" }}%"

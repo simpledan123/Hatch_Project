@@ -8,3 +8,4 @@ redis
 python-dotenv
 pytest
 httpx
+prometheus-fastapi-instrumentator
