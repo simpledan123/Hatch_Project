@@ -12,7 +12,19 @@ from app.models.pet_action_log import PetActionLog
 from app.schemas.pet import PetStateResponse
 from app.services.redis_service import get_redis_client
 
-ActionType = Literal["feed", "clean", "play", "sleep"]
+ActionType = Literal[
+    "feed", "clean", "play", "sleep",
+    "study", "train", "medicine", "clean_poop",
+    "hatch", "graduate",
+]
+ 
+# Life stage thresholds in minutes since hatching
+STAGE_THRESHOLDS = {
+    "baby": 0,
+    "child": 60,
+    "teen": 360,
+    "adult": 1440,
+}
 
 
 def clamp(value: int, minimum: int = 0, maximum: int = 100) -> int:

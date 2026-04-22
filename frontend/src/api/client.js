@@ -2,36 +2,20 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, ""
 
 async function request(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
-
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.detail || "요청에 실패했습니다.");
-  }
+  if (!response.ok) throw new Error(data.detail || "요청에 실패했습니다.");
   return data;
 }
 
 export async function createGuestUser(nickname) {
-  return request("/api/users/guest", {
-    method: "POST",
-    body: JSON.stringify({ nickname }),
-  });
+  return request("/api/users/guest", { method: "POST", body: JSON.stringify({ nickname }) });
 }
 
 export async function createPet({ userId, name, species }) {
-  return request("/api/pets", {
-    method: "POST",
-    body: JSON.stringify({
-      user_id: userId,
-      name,
-      species,
-    }),
-  });
+  return request("/api/pets", { method: "POST", body: JSON.stringify({ user_id: userId, name, species }) });
 }
 
 export async function getPet(petId) {
@@ -39,7 +23,9 @@ export async function getPet(petId) {
 }
 
 export async function runAction(petId, actionType) {
-  return request(`/api/pets/${petId}/actions/${actionType}`, {
-    method: "POST",
-  });
+  return request(`/api/pets/${petId}/actions/${actionType}`, { method: "POST" });
+}
+
+export async function renamePet(petId, name) {
+  return request(`/api/pets/${petId}/name`, { method: "PATCH", body: JSON.stringify({ name }) });
 }

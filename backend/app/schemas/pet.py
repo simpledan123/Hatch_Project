@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -20,7 +19,18 @@ class PetStateResponse(BaseModel):
     happiness: int
     energy: int
     health: int
+    smarts: int
+    activity: int
     status: str
+    life_stage: str
+    character_type: int
+    evolution_form: str
+    poop_count: int
+    feed_tally: int
+    play_tally: int
+    study_tally: int
+    train_tally: int
+    hatched_at: datetime | None = None
     last_decay_at: datetime
     created_at: datetime
     updated_at: datetime | None = None
@@ -30,6 +40,6 @@ class PetStateResponse(BaseModel):
 
 
 class PetActionResponse(BaseModel):
-    action_type: Literal["feed", "clean", "play", "sleep"]
+    action_type: str
     pet: PetStateResponse
     message: str
