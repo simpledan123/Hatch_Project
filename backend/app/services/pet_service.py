@@ -17,7 +17,7 @@ ActionType = Literal[
     "study", "train", "medicine", "clean_poop",
     "hatch", "graduate",
 ]
- 
+
 # Life stage thresholds in minutes since hatching
 STAGE_THRESHOLDS = {
     "baby": 0,
@@ -137,6 +137,21 @@ def invalidate_pet_cache(pet_id: int) -> None:
         pass
 
 
+def write_through_pet_cache(pet_id: int, response: PetStateResponse) -> None:
+    """Write-Through 패턴: DB 커밋 직후 캐시를 즉시 최신 상태로 갱신한다.
+    캐시를 삭제하지 않고 덮어씌우므로, 동시 요청이 몰려도 캐시 미스가
+    연쇄적으로 DB에 전달되는 Cache Stampede를 방지한다.
+    """
+    try:
+        get_redis_client().setex(
+            get_pet_cache_key(pet_id),
+            timedelta(seconds=30),
+            response.model_dump_json(),
+        )
+    except RedisError:
+        pass
+
+
 def get_pet_state(db: Session, pet_id: int) -> PetStateResponse:
     cache_key = get_pet_cache_key(pet_id)
 
@@ -229,5 +244,7 @@ def perform_action(
     db.commit()
     db.refresh(pet)
 
-    invalidate_pet_cache(pet_id)
-    return build_pet_state_response(pet)
+    # Write-Through: 캐시 삭제 대신 즉시 갱신하여 Cache Stampede 방지
+    response = build_pet_state_response(pet, cached=False)
+    write_through_pet_cache(pet_id, response)
+    return response
