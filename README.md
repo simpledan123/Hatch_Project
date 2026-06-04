@@ -55,7 +55,7 @@
 - 케어 이력 누적 기반 진화형 결정
 - 어른 도달 시 보내주기 → 새 게임 시작
 - 사망 처리 및 무지개 다리 화면
-- Redis 기반 상태 조회 캐시 (TTL 30초, 액션 발생 시 무효화)
+- Redis 기반 상태 조회 캐시 (TTL 30초, Write-Through 갱신)
 - Redis 기반 반복 액션 rate limiting
 
 ### 인프라 / 운영
@@ -166,7 +166,7 @@ docker compose up --build
 단순히 스탯 수치만 보는 것이 아니라, 성장 기간 동안 어떤 액션을 얼마나 수행했는지를 tally로 누적해 최종 진화형을 결정합니다. 같은 캐릭터라도 플레이 방식에 따라 다른 어른이 됩니다.
 
 ### 3. Redis 기반 캐시와 rate limiting
-상태 조회 API에 TTL 30초 캐시를 적용하고, 액션 발생 시 캐시를 무효화합니다. 동일 액션 반복 호출은 Redis INCR 기반 rate limiting으로 제어했습니다. Redis 장애 시에도 서비스는 계속 동작합니다.
+상태 조회 API에 TTL 30초 캐시를 적용합니다. 액션 발생 시 캐시를 삭제하지 않고 Write-Through 패턴으로 즉시 갱신하여 Cache Stampede를 방지합니다. 동일 액션 반복 호출은 Redis INCR 기반 rate limiting으로 제어했습니다. Redis 장애 시에도 서비스는 계속 동작합니다.
 
 ### 4. L4 로드밸런서 기반 가용성
 HAProxy로 backend 2대에 트래픽을 분산하고, 헬스체크 실패 시 자동으로 제외, 복구 시 재시작 없이 자동 편입되도록 구성했습니다.
@@ -176,3 +176,32 @@ node-exporter로 서버 CPU / 메모리 / 디스크를 수집하고, prometheus-
 
 ### 6. 백업 및 복구 절차
 pg_dump 전체 백업 자동화, gzip 무결성 검증, 보존 기간 관리를 스크립트로 처리했습니다. 단순 백업 파일 생성에 그치지 않고, 복구 절차까지 RUNBOOK.md에 정리했습니다.
+
+---
+
+## 트러블슈팅
+
+### Cache Stampede — P99 응답시간 3.5s → 0.12s
+
+**문제**
+
+Locust 부하 테스트 중 동시 펫 케어 액션이 집중되자 API P99 응답시간이 3.5초까지 치솟고, HAProxy 백엔드 헬스 체크가 끊어지며 서비스 전체가 다운되었다.
+
+**원인 파악**
+
+Alertmanager 레이턴시 알림을 시작점으로 Grafana 대시보드를 분석한 결과, 액션 발생 시마다 캐시를 삭제(`invalidate_pet_cache`)하는 로직이 원인임을 확인했다. 삭제 직후 다수의 요청이 동시에 캐시 미스를 일으켜 PostgreSQL에 부하가 집중되는 Cache Stampede가 발생하고 있었으며, 캐시 히트율이 20%까지 떨어진 상태였다.
+
+**해결**
+
+캐시 삭제 방식을 Write-Through 패턴으로 전환했다. DB 커밋 직후 캐시를 삭제하는 대신 최신 상태로 즉시 덮어씌워(`write_through_pet_cache`), 후속 요청이 항상 캐시에서 응답을 받도록 했다. 추가로 SQLAlchemy 커넥션 풀을 최적화하여 DB 연결 대기 시간을 줄였다.
+
+결과적으로 P99 응답시간이 3.5s에서 0.12s로 감소하였고, 서비스 가용성이 복구되었다.
+
+```python
+# Before: 액션 후 캐시 삭제 → Cache Stampede 발생
+invalidate_pet_cache(pet_id)
+
+# After: Write-Through — DB 커밋 직후 캐시를 최신 상태로 즉시 갱신
+response = build_pet_state_response(pet, cached=False)
+write_through_pet_cache(pet_id, response)
+```
