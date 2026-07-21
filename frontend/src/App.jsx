@@ -459,7 +459,7 @@ export default function App() {
       try {
         const latest = await getPet(pet.id);
         setPet(latest);
-        if (latest.life_stage === "dead") {
+        if (latest.status === "dead") {
           setScreen("dead");
           clearInterval(pollRef.current);
         }
@@ -522,7 +522,7 @@ export default function App() {
       const res = await runAction(pet.id, actionType);
       setPet(res.pet);
       setMessage(res.message);
-      if (res.pet.life_stage === "dead") setScreen("dead");
+      if (res.pet.status === "dead") setScreen("dead");
     } catch (e) {
       setMessage(e.message);
     } finally {

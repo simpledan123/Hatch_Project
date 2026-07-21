@@ -1,6 +1,7 @@
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +20,43 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 
-app = FastAPI(title=settings.app_name)
+def _migrate_pets_table() -> None:
+    new_columns = [
+        ("smarts", "INTEGER NOT NULL DEFAULT 50"),
+        ("activity", "INTEGER NOT NULL DEFAULT 50"),
+        ("life_stage", "VARCHAR(20) NOT NULL DEFAULT 'egg'"),
+        ("character_type", "INTEGER NOT NULL DEFAULT 0"),
+        ("evolution_form", "VARCHAR(20) NOT NULL DEFAULT 'normal'"),
+        ("poop_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_poop_at", "TIMESTAMP WITH TIME ZONE"),
+        ("feed_tally", "INTEGER NOT NULL DEFAULT 0"),
+        ("play_tally", "INTEGER NOT NULL DEFAULT 0"),
+        ("study_tally", "INTEGER NOT NULL DEFAULT 0"),
+        ("train_tally", "INTEGER NOT NULL DEFAULT 0"),
+        ("sick_tally", "INTEGER NOT NULL DEFAULT 0"),
+        ("hatched_at", "TIMESTAMP WITH TIME ZONE"),
+    ]
+    with engine.connect() as conn:
+        for col_name, col_def in new_columns:
+            try:
+                conn.execute(
+                    __import__("sqlalchemy").text(
+                        f"ALTER TABLE pets ADD COLUMN IF NOT EXISTS {col_name} {col_def}"
+                    )
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    _migrate_pets_table()
+    yield
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,39 +82,6 @@ async def add_request_id_and_log(request: Request, call_next):
     )
     response.headers["X-Request-ID"] = request_id
     return response
-
-
-def _migrate_pets_table() -> None:
-    new_columns = [
-        ("smarts", "INTEGER NOT NULL DEFAULT 50"),
-        ("activity", "INTEGER NOT NULL DEFAULT 50"),
-        ("life_stage", "VARCHAR(20) NOT NULL DEFAULT 'egg'"),
-        ("character_type", "INTEGER NOT NULL DEFAULT 0"),
-        ("evolution_form", "VARCHAR(20) NOT NULL DEFAULT 'normal'"),
-        ("poop_count", "INTEGER NOT NULL DEFAULT 0"),
-        ("feed_tally", "INTEGER NOT NULL DEFAULT 0"),
-        ("play_tally", "INTEGER NOT NULL DEFAULT 0"),
-        ("study_tally", "INTEGER NOT NULL DEFAULT 0"),
-        ("train_tally", "INTEGER NOT NULL DEFAULT 0"),
-        ("hatched_at", "TIMESTAMP WITH TIME ZONE"),
-    ]
-    with engine.connect() as conn:
-        for col_name, col_def in new_columns:
-            try:
-                conn.execute(
-                    __import__("sqlalchemy").text(
-                        f"ALTER TABLE pets ADD COLUMN IF NOT EXISTS {col_name} {col_def}"
-                    )
-                )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    Base.metadata.create_all(bind=engine)
-    _migrate_pets_table()
 
 
 @app.get("/")

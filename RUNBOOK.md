@@ -3,6 +3,18 @@
 > hatch_project 운영 절차 문서
 > 서비스 기동, 상태 점검, 장애 대응, 배포, 인증서 갱신, 백업 절차를 정리한 문서입니다.
 
+운영 서버에서는 아래 함수를 셸에 등록한 뒤 이후 명령의 `dc`로 사용합니다.
+
+```bash
+dc() {
+  sudo docker compose \
+    --env-file .env.prod \
+    -f docker-compose.yml \
+    -f docker-compose.prod.yml \
+    "$@"
+}
+```
+
 ---
 
 ## 목차
@@ -22,29 +34,29 @@
 ### 기동
 ```bash
 cd /path/to/hatch_project
-sudo docker compose --env-file .env.prod up -d
+dc up -d
 ```
 
 ### 중지
 ```bash
-sudo docker compose --env-file .env.prod down
+dc down
 ```
 
 ### 재시작 (전체)
 ```bash
-sudo docker compose --env-file .env.prod down
-sudo docker compose --env-file .env.prod up -d
+dc down
+dc up -d
 ```
 
 ### 특정 컨테이너만 재시작
 ```bash
-sudo docker compose --env-file .env.prod restart backend
-sudo docker compose --env-file .env.prod restart frontend
+dc restart backend
+dc restart frontend
 ```
 
 ### 컨테이너 상태 확인
 ```bash
-sudo docker compose ps
+dc ps
 ```
 
 정상 상태 예시:
@@ -81,7 +93,7 @@ hatch-node-exporter   Up
 [OK] Service health checks passed
 ```
 
-### HAProxy 로드밸런서 상태 확인
+### HAProxy HTTP 프록시 상태 확인
 ```bash
 # 통계 대시보드 (브라우저)
 http://localhost:8404/stats
@@ -91,8 +103,9 @@ curl -s http://localhost:8080/api/health/live
 ```
 
 HAProxy stats에서 확인할 항목:
-- backend1, backend2 모두 초록색 → 정상
-- 하나가 빨간색 → 해당 서버 장애, 나머지로 자동 전환 중
+- `backend1`이 정상이고 `backend2`가 backup 상태 → 주 서버가 요청 처리 중
+- `backend1`이 DOWN이고 `backend2`가 요청 처리 중 → 대기 서버로 자동 전환된 상태
+- `backend1`이 3회 연속 정상 응답 → 주 서버로 자동 복귀
 
 ### WireGuard VPN 상태 확인
 ```bash
@@ -118,10 +131,10 @@ curl -I https://your-name.duckdns.org
 ### 3-1. 컨테이너가 올라오지 않는 경우
 
 ```bash
-sudo docker compose logs --tail 100
-sudo docker compose logs backend --tail 100
-sudo docker compose logs db --tail 100
-sudo docker compose logs frontend --tail 100
+dc logs --tail 100
+dc logs backend --tail 100
+dc logs db --tail 100
+dc logs frontend --tail 100
 ```
 
 조치 순서:
@@ -135,15 +148,15 @@ sudo docker compose logs frontend --tail 100
 ### 3-2. DB 연결 실패 (`"database": false`)
 
 ```bash
-sudo docker compose ps db
-sudo docker compose logs db --tail 50
-sudo docker compose restart db
+dc ps db
+dc logs db --tail 50
+dc restart db
 ./scripts/healthcheck.sh
 ```
 
 DB 재시작 후 backend도 재시작:
 ```bash
-sudo docker compose restart backend backend2
+dc restart backend backend2
 ```
 
 ---
@@ -151,9 +164,9 @@ sudo docker compose restart backend backend2
 ### 3-3. Redis 연결 실패 (`"redis": false`)
 
 ```bash
-sudo docker compose exec redis redis-cli ping
-sudo docker compose restart redis
-sudo docker compose restart backend backend2
+dc exec redis redis-cli ping
+dc restart redis
+dc restart backend backend2
 ```
 
 Redis 장애 시 캐시 및 rate limiting만 비활성화되고 서비스는 계속 동작합니다.
@@ -167,10 +180,10 @@ Redis 장애 시 캐시 및 rate limiting만 비활성화되고 서비스는 계
 curl http://localhost:8404/stats
 
 # 장애 서버 로그 확인
-sudo docker compose logs backend --tail 100
+dc logs backend --tail 100
 
 # 서버 재시작 (HAProxy가 자동으로 복귀 감지)
-sudo docker compose restart backend
+dc restart backend
 ```
 
 fall 2 설정으로 2회 헬스체크 실패 시 자동 제외, rise 3 설정으로 3회 성공 시 자동 복귀합니다.
@@ -180,9 +193,9 @@ fall 2 설정으로 2회 헬스체크 실패 시 자동 제외, rise 3 설정으
 ### 3-5. Nginx (프론트엔드) 접속 불가
 
 ```bash
-sudo docker compose logs frontend --tail 50
-sudo docker compose exec frontend nginx -t
-sudo docker compose restart frontend
+dc logs frontend --tail 50
+dc exec frontend nginx -t
+dc restart frontend
 sudo certbot certificates
 ```
 
@@ -205,7 +218,7 @@ git pull origin main
 ./scripts/deploy.sh
 ```
 
-`deploy.sh` 내부 동작:
+로컬 배포는 `deploy.sh`, 운영 배포는 `.env.prod`와 두 Compose 파일을 사용하는 `remote_deploy.sh`를 실행합니다. 스크립트 내부 동작은 다음과 같습니다.
 1. `docker compose up -d --build`
 2. healthcheck 통과 대기 (최대 60초)
 3. smoke test 실행
@@ -222,9 +235,9 @@ sudo crontab -l | grep certbot
 
 ### 수동 갱신
 ```bash
-sudo docker compose down
+dc down
 sudo certbot renew
-sudo docker compose --env-file .env.prod up -d
+dc up -d
 ```
 
 ### 인증서 만료일 확인
@@ -237,14 +250,14 @@ sudo certbot certificates
 ## 6. 로그 확인
 
 ```bash
-sudo docker compose logs --tail 100
-sudo docker compose logs backend --tail 100
-sudo docker compose logs -f backend
+dc logs --tail 100
+dc logs backend --tail 100
+dc logs -f backend
 ```
 
 ### request_id 기반 요청 추적
 ```bash
-sudo docker compose logs backend | grep "request_id=abc-123"
+dc logs backend | grep "request_id=abc-123"
 ```
 
 ---
@@ -307,20 +320,20 @@ ls -lht backups/
 
 #### 2. 서비스 중지
 ```bash
-sudo docker compose stop backend backend2 haproxy
+dc stop backend backend2 haproxy
 ```
 
 #### 3. 기존 DB 초기화 및 복구
 ```bash
 # 압축 해제 후 복구
 gunzip -c backups/hatch_db_YYYYMMDD_HHMMSS.sql.gz \
-  | sudo docker compose exec -T db \
+  | dc exec -T db \
     psql -U ${POSTGRES_USER} -d ${POSTGRES_DB}
 ```
 
 #### 4. 서비스 재시작
 ```bash
-sudo docker compose start backend backend2 haproxy
+dc start backend backend2 haproxy
 ./scripts/healthcheck.sh
 ```
 

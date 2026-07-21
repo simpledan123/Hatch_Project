@@ -21,6 +21,7 @@ scrape_configs:
     static_configs:
       - targets:
           - backend:8000
+          - backend2:8000
     metrics_path: /metrics
 
   - job_name: node-exporter

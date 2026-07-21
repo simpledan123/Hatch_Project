@@ -49,7 +49,11 @@ fi
 # ── 2. 컨테이너 중지 (standalone 모드는 80포트 직접 점유) ───────────────────
 echo "[2/4] 기존 컨테이너 중지 (포트 80 확보)"
 cd "$PROJECT_ROOT"
-sudo docker compose down || true
+sudo docker compose \
+  --env-file "$ENV_FILE" \
+  -f docker-compose.yml \
+  -f docker-compose.prod.yml \
+  down || true
 
 # ── 3. 인증서 발급 ──────────────────────────────────────────────────────────
 echo "[3/4] Let's Encrypt 인증서 발급 (standalone)"
@@ -65,7 +69,7 @@ echo "[INFO] 경로: /etc/letsencrypt/live/$DOMAIN/"
 
 # ── 4. 자동 갱신 크론 등록 ─────────────────────────────────────────────────
 echo "[4/4] 자동 갱신 크론 등록 확인"
-CRON_JOB="0 3 * * * certbot renew --quiet --pre-hook 'docker compose -f $PROJECT_ROOT/docker-compose.yml down' --post-hook 'docker compose -f $PROJECT_ROOT/docker-compose.yml up -d'"
+CRON_JOB="0 3 * * * certbot renew --quiet --pre-hook 'docker compose --env-file $ENV_FILE -f $PROJECT_ROOT/docker-compose.yml -f $PROJECT_ROOT/docker-compose.prod.yml down' --post-hook 'docker compose --env-file $ENV_FILE -f $PROJECT_ROOT/docker-compose.yml -f $PROJECT_ROOT/docker-compose.prod.yml up -d'"
 
 if sudo crontab -l 2>/dev/null | grep -q "certbot renew"; then
   echo "[INFO] 자동 갱신 크론이 이미 등록되어 있음"
@@ -77,4 +81,4 @@ fi
 echo ""
 echo "[OK] SSL 설정 완료"
 echo "[NEXT] 이제 컨테이너를 다시 시작하세요:"
-echo "       sudo docker compose --env-file .env.prod up -d --build"
+echo "       sudo docker compose --env-file .env.prod -f docker-compose.yml -f docker-compose.prod.yml up -d --build"

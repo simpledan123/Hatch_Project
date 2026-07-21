@@ -38,7 +38,7 @@ json_get() {
   python3 -c 'import json,sys; data=json.load(sys.stdin); print(data[sys.argv[1]])' "$key" <<< "$json"
 }
 
-echo "[1/4] Create guest user"
+echo "[1/5] Create guest user"
 request POST "$API_BASE/users/guest" "{\"nickname\":\"$NICKNAME\"}"
 echo "[INFO] status=$HTTP_CODE body=$HTTP_BODY"
 if [[ "$HTTP_CODE" != "201" ]]; then
@@ -47,7 +47,7 @@ if [[ "$HTTP_CODE" != "201" ]]; then
 fi
 USER_ID="$(json_get "$HTTP_BODY" id)"
 
-echo "[2/4] Create pet"
+echo "[2/5] Create pet"
 request POST "$API_BASE/pets" "{\"user_id\":$USER_ID,\"name\":\"$PET_NAME\",\"species\":\"$SPECIES\"}"
 echo "[INFO] status=$HTTP_CODE body=$HTTP_BODY"
 if [[ "$HTTP_CODE" != "201" ]]; then
@@ -56,7 +56,7 @@ if [[ "$HTTP_CODE" != "201" ]]; then
 fi
 PET_ID="$(json_get "$HTTP_BODY" id)"
 
-echo "[3/4] Read pet state"
+echo "[3/5] Read pet state"
 request GET "$API_BASE/pets/$PET_ID"
 echo "[INFO] status=$HTTP_CODE body=$HTTP_BODY"
 if [[ "$HTTP_CODE" != "200" ]]; then
@@ -64,7 +64,16 @@ if [[ "$HTTP_CODE" != "200" ]]; then
   exit 1
 fi
 
-echo "[4/4] Run feed action"
+echo "[4/5] Hatch pet"
+request POST "$API_BASE/pets/$PET_ID/actions/hatch"
+echo "[INFO] status=$HTTP_CODE body=$HTTP_BODY"
+
+if [[ "$HTTP_CODE" != "200" ]]; then
+  echo "[ERROR] Hatch action failed"
+  exit 1
+fi
+
+echo "[5/5] Run feed action"
 request POST "$API_BASE/pets/$PET_ID/actions/feed"
 echo "[INFO] status=$HTTP_CODE body=$HTTP_BODY"
 if [[ "$HTTP_CODE" != "200" ]]; then

@@ -4,7 +4,8 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$PROJECT_ROOT/.env.prod}"
-COMPOSE_FILE="${COMPOSE_FILE:-$PROJECT_ROOT/docker-compose.prod.yml}"
+BASE_COMPOSE_FILE="${BASE_COMPOSE_FILE:-$PROJECT_ROOT/docker-compose.yml}"
+PROD_COMPOSE_FILE="${PROD_COMPOSE_FILE:-$PROJECT_ROOT/docker-compose.prod.yml}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "[ERROR] $ENV_FILE 파일이 없습니다."
@@ -17,12 +18,16 @@ source "$ENV_FILE"
 set +a
 
 BASE_URL="${BASE_URL:-http://localhost:${BACKEND_PORT:-8000}}"
-PUBLIC_URL="${PUBLIC_URL:-http://localhost:${NGINX_PORT:-80}}"
+PUBLIC_URL="${PUBLIC_URL:-https://${DOMAIN}}"
 
 cd "$PROJECT_ROOT"
 
 echo "[1/4] Build and start production containers"
-sudo docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build
+sudo docker compose \
+  --env-file "$ENV_FILE" \
+  -f "$BASE_COMPOSE_FILE" \
+  -f "$PROD_COMPOSE_FILE" \
+  up -d --build
 
 echo "[2/4] Wait for backend readiness"
 for attempt in {1..20}; do
@@ -33,7 +38,11 @@ for attempt in {1..20}; do
 
   if [[ "$attempt" == "20" ]]; then
     echo "[ERROR] Backend did not become ready in time"
-    sudo docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" logs backend --tail 100
+    sudo docker compose \
+      --env-file "$ENV_FILE" \
+      -f "$BASE_COMPOSE_FILE" \
+      -f "$PROD_COMPOSE_FILE" \
+      logs backend --tail 100
     exit 1
   fi
 

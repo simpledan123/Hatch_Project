@@ -1,5 +1,11 @@
 __pycache__/
 *.py[cod]
 .env
+.env.prod
+.env.*
+!.env.example
+!.env.prod.example
 node_modules/
 dist/
+.venv-loadtest/
+loadtest/results/

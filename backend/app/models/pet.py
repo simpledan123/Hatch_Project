@@ -33,12 +33,14 @@ class Pet(Base):
 
     # Poop mechanic
     poop_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_poop_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Care tallies for evolution determination
     feed_tally: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     play_tally: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     study_tally: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     train_tally: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sick_tally: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Timestamps
     hatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

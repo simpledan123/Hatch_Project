@@ -59,9 +59,9 @@
 - Redis 기반 반복 액션 rate limiting
 
 ### 인프라 / 운영
-- Docker Compose 기반 실행 환경 (로컬 / prod 분리)
+- Docker Compose 기본 구성과 운영용 override 구성 분리
 - Oracle Cloud VM(Ubuntu 22.04) 배포, 공인 IP 외부 접속
-- HAProxy L4 로드밸런서 (backend 2대 라운드로빈, 헬스체크 기반 자동 페일오버)
+- HAProxy L7 HTTP 프록시 (주 서버 + 대기 서버, HTTP 헬스체크 기반 자동 페일오버)
 - Nginx 정적 서빙 및 `/api` 리버스 프록시, HTTPS 강제 리다이렉트
 - Let's Encrypt + certbot HTTPS 인증서 (매일 새벽 3시 자동 갱신)
 - Duck DNS 도메인 연결
@@ -74,7 +74,7 @@
 - `/api/health/live`, `/api/health/ready` 헬스 체크 분리
 - request id 및 요청 처리 시간 로그
 - Prometheus metrics 엔드포인트 (`/metrics`)
-- GitHub Actions backend CI (pytest)
+- GitHub Actions CI (backend pytest, frontend production build)
 - RUNBOOK.md 운영 절차 문서화
 
 ---
@@ -87,11 +87,11 @@
 | Backend | Python, FastAPI, SQLAlchemy |
 | Database | PostgreSQL, Redis |
 | Infrastructure | Docker / Docker Compose, Oracle Cloud VM |
-| Load Balancer | HAProxy (L4) |
+| Traffic / Failover | Nginx, HAProxy (L7 HTTP, Active-Standby) |
 | Monitoring | Prometheus, Grafana, Alertmanager, node-exporter |
 | VPN | WireGuard |
 | SSL | Let's Encrypt + certbot |
-| CI | GitHub Actions |
+| CI | GitHub Actions, pytest, Vite production build |
 
 ---
 
@@ -110,10 +110,10 @@
 [ Nginx (443 SSL) ]
     |
     v
-[ HAProxy :80 ] ← L4 로드밸런서
+[ HAProxy :80 ] ← L7 HTTP 프록시
     |              |
     v              v
-[ FastAPI ]   [ FastAPI ]   ← backend / backend2
+[ FastAPI ]   [ FastAPI ]   ← primary / standby
     |    |
     v    v
 [PostgreSQL] [Redis]
@@ -130,15 +130,26 @@
 
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose --env-file .env up -d --build
 ```
 
 접속 주소:
-- Frontend: `http://localhost:5173`
+- Frontend: `http://localhost`
 - Backend Swagger: `http://localhost:8000/docs`
 - HAProxy Stats: `http://localhost:8404/stats`
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`
+
+기본 구성은 로컬 확인을 위해 HTTP로 실행됩니다. 운영 환경에서는 `.env.prod`와 `docker-compose.prod.yml`을 함께 사용하여 HTTPS를 활성화합니다.
+
+```bash
+cp .env.prod.example .env.prod
+sudo docker compose \
+  --env-file .env.prod \
+  -f docker-compose.yml \
+  -f docker-compose.prod.yml \
+  up -d --build
+```
 
 ---
 
@@ -155,6 +166,17 @@ docker compose up --build
 | `wireguard_peer.sh` | WireGuard peer 추가 / 제거 / 목록 / 상태 확인 |
 | `backup_db.sh` | DB 전체 백업, 무결성 검증, 오래된 백업 정리, 원격 전송 |
 
+## 테스트
+
+백엔드 테스트는 SQLite 인메모리 데이터베이스를 사용하며 헬스 체크와 핵심 펫 액션 흐름을 검증합니다.
+
+```bash
+cd backend
+pytest -q
+```
+
+배포 후에는 `healthcheck.sh`와 `smoke_test.sh`로 준비 상태와 사용자 생성 → 펫 생성 → 부화 → 케어 액션의 핵심 흐름을 확인합니다. Locust 성능 테스트의 시나리오와 실행 조건은 [`docs/PERFORMANCE_TEST.md`](docs/PERFORMANCE_TEST.md)에 정리했습니다.
+
 ---
 
 ## 개발하면서 신경 쓴 점
@@ -168,8 +190,8 @@ docker compose up --build
 ### 3. Redis 기반 캐시와 rate limiting
 상태 조회 API에 TTL 30초 캐시를 적용합니다. 액션 발생 시 캐시를 삭제하지 않고 Write-Through 패턴으로 즉시 갱신하여 Cache Stampede를 방지합니다. 동일 액션 반복 호출은 Redis INCR 기반 rate limiting으로 제어했습니다. Redis 장애 시에도 서비스는 계속 동작합니다.
 
-### 4. L4 로드밸런서 기반 가용성
-HAProxy로 backend 2대에 트래픽을 분산하고, 헬스체크 실패 시 자동으로 제외, 복구 시 재시작 없이 자동 편입되도록 구성했습니다.
+### 4. L7 HTTP 프록시 기반 가용성
+Nginx의 `/api` 요청을 HAProxy로 전달하고, HAProxy가 주 백엔드의 `/api/health/live`를 3초마다 확인하도록 구성했습니다. 주 서버가 2회 연속 실패하면 대기 서버로 전환하고, 주 서버가 3회 연속 정상 응답하면 자동으로 복귀합니다.
 
 ### 5. 통합 모니터링
 node-exporter로 서버 CPU / 메모리 / 디스크를 수집하고, prometheus-fastapi-instrumentator로 API 응답시간과 에러율을 계측합니다. Alertmanager로 주요 임계치 초과 시 알림이 발송됩니다.
@@ -181,7 +203,7 @@ pg_dump 전체 백업 자동화, gzip 무결성 검증, 보존 기간 관리를 
 
 ## 트러블슈팅
 
-### Cache Stampede — P99 응답시간 3.5s → 0.12s
+### Cache Stampede — 기록된 P99 응답시간 3.5s → 0.12s
 
 **문제**
 
@@ -189,13 +211,13 @@ Locust 부하 테스트 중 동시 펫 케어 액션이 집중되자 API P99 응
 
 **원인 파악**
 
-Alertmanager 레이턴시 알림을 시작점으로 Grafana 대시보드를 분석한 결과, 액션 발생 시마다 캐시를 삭제(`invalidate_pet_cache`)하는 로직이 원인임을 확인했다. 삭제 직후 다수의 요청이 동시에 캐시 미스를 일으켜 PostgreSQL에 부하가 집중되는 Cache Stampede가 발생하고 있었으며, 캐시 히트율이 20%까지 떨어진 상태였다.
+Alertmanager 레이턴시 알림을 시작점으로 Grafana 대시보드와 애플리케이션 로직을 분석한 결과, 액션 발생 시마다 캐시를 삭제(`invalidate_pet_cache`)하는 동작을 원인으로 좁혔습니다. 삭제 직후 다수의 요청이 동시에 캐시 미스를 일으켜 PostgreSQL에 부하가 집중되는 Cache Stampede가 발생하고 있었습니다.
 
 **해결**
 
-캐시 삭제 방식을 Write-Through 패턴으로 전환했다. DB 커밋 직후 캐시를 삭제하는 대신 최신 상태로 즉시 덮어씌워(`write_through_pet_cache`), 후속 요청이 항상 캐시에서 응답을 받도록 했다. 추가로 SQLAlchemy 커넥션 풀을 최적화하여 DB 연결 대기 시간을 줄였다.
+캐시 삭제 방식을 Write-Through 패턴으로 전환했습니다. DB 커밋 직후 캐시를 삭제하는 대신 최신 상태로 즉시 덮어씌워(`write_through_pet_cache`), 후속 조회 요청이 캐시 미스로 동시에 데이터베이스에 전달되는 상황을 줄였습니다.
 
-결과적으로 P99 응답시간이 3.5s에서 0.12s로 감소하였고, 서비스 가용성이 복구되었다.
+기록된 테스트에서 P99 응답시간이 3.5s에서 0.12s로 감소했고 서비스 가용성이 복구되었습니다. 이후 동일 조건의 비교와 결과 보관을 위해 재현 가능한 Locust 시나리오와 측정 절차를 [`docs/PERFORMANCE_TEST.md`](docs/PERFORMANCE_TEST.md)에 추가했습니다.
 
 ```python
 # Before: 액션 후 캐시 삭제 → Cache Stampede 발생
