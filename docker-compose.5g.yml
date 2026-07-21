@@ -1,0 +1,285 @@
+name: hatch-5g-lab
+
+x-nf-defaults: &nf-defaults
+  restart: unless-stopped
+  networks:
+    - open5gs
+
+services:
+  db:
+    image: mongo:${MONGODB_VERSION:-8.0}
+    container_name: hatch-5g-db
+    restart: unless-stopped
+    command: ["mongod", "--bind_ip", "0.0.0.0", "--port", "27017"]
+    networks:
+      open5gs:
+        aliases:
+          - db.open5gs.org
+    volumes:
+      - db_data:/data/db
+      - db_config:/data/configdb
+      - ./config/mongodb/01-subscriber.js:/docker-entrypoint-initdb.d/01-subscriber.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  nrf:
+    <<: *nf-defaults
+    image: ghcr.io/borjis131/nrf:${OPEN5GS_VERSION:-v2.7.6}
+    container_name: hatch-5g-nrf
+    command: ["-c", "/etc/open5gs/custom/nrf.yaml"]
+    networks:
+      open5gs:
+        aliases:
+          - nrf.open5gs.org
+    configs:
+      - source: nrf_config
+        target: /etc/open5gs/custom/nrf.yaml
+
+  ausf:
+    <<: *nf-defaults
+    image: ghcr.io/borjis131/ausf:${OPEN5GS_VERSION:-v2.7.6}
+    container_name: hatch-5g-ausf
+    command: ["-c", "/etc/open5gs/custom/ausf.yaml"]
+    networks:
+      open5gs:
+        aliases:
+          - ausf.open5gs.org
+    configs:
+      - source: ausf_config
+        target: /etc/open5gs/custom/ausf.yaml
+    depends_on:
+      - nrf
+
+  udm:
+    <<: *nf-defaults
+    image: ghcr.io/borjis131/udm:${OPEN5GS_VERSION:-v2.7.6}
+    container_name: hatch-5g-udm
+    command: ["-c", "/etc/open5gs/custom/udm.yaml"]
+    networks:
+      open5gs:
+        aliases:
+          - udm.open5gs.org
+    configs:
+      - source: udm_config
+        target: /etc/open5gs/custom/udm.yaml
+    depends_on:
+      - nrf
+
+  udr:
+    <<: *nf-defaults
+    image: ghcr.io/borjis131/udr:${OPEN5GS_VERSION:-v2.7.6}
+    container_name: hatch-5g-udr
+    command: ["-c", "/etc/open5gs/custom/udr.yaml"]
+    networks:
+      open5gs:
+        aliases:
+          - udr.open5gs.org
+    configs:
+      - source: udr_config
+        target: /etc/open5gs/custom/udr.yaml
+    depends_on:
+      db:
+        condition: service_healthy
+      nrf:
+        condition: service_started
+
+  nssf:
+    <<: *nf-defaults
+    image: ghcr.io/borjis131/nssf:${OPEN5GS_VERSION:-v2.7.6}
+    container_name: hatch-5g-nssf
+    command: ["-c", "/etc/open5gs/custom/nssf.yaml"]
+    networks:
+      open5gs:
+        aliases:
+          - nssf.open5gs.org
+    configs:
+      - source: nssf_config
+        target: /etc/open5gs/custom/nssf.yaml
+    depends_on:
+      - nrf
+
+  bsf:
+    <<: *nf-defaults
+    image: ghcr.io/borjis131/bsf:${OPEN5GS_VERSION:-v2.7.6}
+    container_name: hatch-5g-bsf
+    command: ["-c", "/etc/open5gs/custom/bsf.yaml"]
+    networks:
+      open5gs:
+        aliases:
+          - bsf.open5gs.org
+    configs:
+      - source: bsf_config
+        target: /etc/open5gs/custom/bsf.yaml
+    depends_on:
+      - nrf
+
+  pcf:
+    <<: *nf-defaults
+    image: ghcr.io/borjis131/pcf:${OPEN5GS_VERSION:-v2.7.6}
+    container_name: hatch-5g-pcf
+    command: ["-c", "/etc/open5gs/custom/pcf.yaml"]
+    networks:
+      open5gs:
+        aliases:
+          - pcf.open5gs.org
+    configs:
+      - source: pcf_config
+        target: /etc/open5gs/custom/pcf.yaml
+    depends_on:
+      db:
+        condition: service_healthy
+      nrf:
+        condition: service_started
+
+  amf:
+    <<: *nf-defaults
+    image: ghcr.io/borjis131/amf:${OPEN5GS_VERSION:-v2.7.6}
+    container_name: hatch-5g-amf
+    command: ["-c", "/etc/open5gs/custom/amf.yaml"]
+    networks:
+      open5gs:
+        aliases:
+          - amf.open5gs.org
+    configs:
+      - source: amf_config
+        target: /etc/open5gs/custom/amf.yaml
+    depends_on:
+      - nrf
+
+  upf:
+    <<: *nf-defaults
+    image: ghcr.io/borjis131/upf:${OPEN5GS_VERSION:-v2.7.6}
+    container_name: hatch-5g-upf
+    command: ["-c", "/etc/open5gs/custom/upf.yaml"]
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    networks:
+      open5gs:
+        aliases:
+          - upf.open5gs.org
+    configs:
+      - source: upf_config
+        target: /etc/open5gs/custom/upf.yaml
+
+  smf:
+    <<: *nf-defaults
+    image: ghcr.io/borjis131/smf:${OPEN5GS_VERSION:-v2.7.6}
+    container_name: hatch-5g-smf
+    command: ["-c", "/etc/open5gs/custom/smf.yaml"]
+    networks:
+      open5gs:
+        aliases:
+          - smf.open5gs.org
+    configs:
+      - source: smf_config
+        target: /etc/open5gs/custom/smf.yaml
+    depends_on:
+      - nrf
+      - upf
+
+  gnb:
+    image: ghcr.io/borjis131/gnb:${UERANSIM_VERSION:-v3.2.7}
+    container_name: hatch-5g-gnb
+    restart: unless-stopped
+    command: ["-c", "/UERANSIM/config/gnb.yaml"]
+    networks:
+      open5gs:
+        aliases:
+          - gnb.ueransim.org
+    configs:
+      - source: gnb_config
+        target: /UERANSIM/config/gnb.yaml
+    depends_on:
+      - amf
+      - smf
+      - pcf
+      - udr
+
+  ue:
+    image: ghcr.io/borjis131/ue:${UERANSIM_VERSION:-v3.2.7}
+    container_name: hatch-5g-ue
+    restart: unless-stopped
+    command: ["-c", "/UERANSIM/config/ue.yaml"]
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      open5gs:
+        aliases:
+          - ue.ueransim.org
+    configs:
+      - source: ue_config
+        target: /UERANSIM/config/ue.yaml
+    depends_on:
+      - gnb
+
+  capture:
+    image: nicolaka/netshoot:v0.13
+    container_name: hatch-5g-capture
+    profiles: ["tools"]
+    network_mode: service:gnb
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./evidence:/evidence
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["trap : TERM INT; sleep infinity & wait"]
+    depends_on:
+      - gnb
+
+  tester:
+    image: curlimages/curl:8.10.1
+    container_name: hatch-5g-tester
+    profiles: ["tools"]
+    network_mode: service:ue
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["trap : TERM INT; sleep infinity & wait"]
+    depends_on:
+      - ue
+
+networks:
+  open5gs:
+    name: hatch-5g-open5gs
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.33.33.0/24
+
+volumes:
+  db_data:
+    name: hatch_5g_db_data
+  db_config:
+    name: hatch_5g_db_config
+
+configs:
+  nrf_config:
+    file: ./config/open5gs/nrf.yaml
+  ausf_config:
+    file: ./config/open5gs/ausf.yaml
+  udm_config:
+    file: ./config/open5gs/udm.yaml
+  udr_config:
+    file: ./config/open5gs/udr.yaml
+  nssf_config:
+    file: ./config/open5gs/nssf.yaml
+  bsf_config:
+    file: ./config/open5gs/bsf.yaml
+  pcf_config:
+    file: ./config/open5gs/pcf.yaml
+  amf_config:
+    file: ./config/open5gs/amf.yaml
+  smf_config:
+    file: ./config/open5gs/smf.yaml
+  upf_config:
+    file: ./config/open5gs/upf.yaml
+  gnb_config:
+    file: ./config/ueransim/gnb.yaml
+  ue_config:
+    file: ./config/ueransim/ue.yaml
